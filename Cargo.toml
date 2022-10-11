@@ -1,0 +1,19 @@
+[package]
+name = "rs-plode"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+ndarray = "0.15.6"
+ndarray-rand = "0.14.0"
+ndarray-stats = "0.5.1"
+noisy_float = "0.2.0" # required for nan checks in ndarray-stats
+petgraph = { version = "0.6.2", optional = true }
+svg = { version = "0.10.0", optional = true }
+
+[features]
+default = ["petgraph", "svg"]
+petgraph = ["dep:petgraph"]
+svg = ["dep:svg"]
