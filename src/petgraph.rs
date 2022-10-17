@@ -1,19 +1,24 @@
-use petgraph::csr::IndexType;
-use petgraph::EdgeType;
-use petgraph::prelude::EdgeRef;
 use crate::Graph;
+use petgraph::csr::IndexType;
+use petgraph::prelude::EdgeRef;
+use petgraph::EdgeType;
 
 impl<N, E, Ty, Ix> Graph for petgraph::Graph<N, E, Ty, Ix>
-    where Ty: EdgeType,
-          Ix: IndexType
+where
+    Ty: EdgeType,
+    Ix: IndexType,
 {
-    fn node_count(&self) -> usize {
+    type Edges = std::vec::IntoIter<(usize, usize)>;
+
+    fn nodes(&self) -> usize {
         petgraph::Graph::node_count(self)
     }
-    fn edges(&self) -> Vec<(usize, usize)> {
-        self.edge_references()
-            .map(
-                |edge| { (edge.source().index(), edge.target().index()) })
-            .collect()
+
+    fn edges(&self) -> Self::Edges {
+        let v: Vec<(usize, usize)> = self
+            .edge_references()
+            .map(|edge| (edge.source().index(), edge.target().index()))
+            .collect();
+        v.into_iter()
     }
 }

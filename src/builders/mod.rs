@@ -1,2 +1,2 @@
-pub mod force;
+pub mod fruchterman_reingold;
 
