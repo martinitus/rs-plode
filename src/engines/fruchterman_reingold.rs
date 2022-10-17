@@ -5,7 +5,7 @@ use ndarray_rand::rand_distr::Uniform;
 use ndarray_rand::RandomExt;
 use ndarray_stats::{MaybeNanExt, QuantileExt};
 
-use crate::{layout::scatter::ScatterLayout, BuildLayout, Graph, Observe};
+use crate::{layout::scatter::ScatterLayout, Engine, Graph};
 
 /// Implements force directed placement by Fruchterman and Reingold.
 ///
@@ -129,17 +129,15 @@ impl FruchtermanReingold {
     }
 }
 
-impl BuildLayout for FruchtermanReingold {
-    type Layout = ScatterLayout;
+impl Engine for FruchtermanReingold {
+    type Layout<'a, G> = ScatterLayout<'a,G> where G: Graph, G:'a;
+    type LayoutSequence<'a, G> = std::vec::IntoIter<Self::Layout<'a,G>> where G: Graph, G:'a;
 
-    fn observe<G: Graph>(
-        mut self,
-        graph: &G,
-        observer: &mut impl Observe<G, Self::Layout>,
-    ) -> Self::Layout {
+    fn animate<'a, G: Graph>(mut self, graph: &'a G) -> Self::LayoutSequence<'a, G> {
         let area = self.width * self.height;
         let k = f32::sqrt(area / graph.nodes() as f32);
         let mut t = self.width / 20.;
+        let mut sequence = Vec::new();
 
         // the positions of the nodes. initialized randomly in 2 dimensions
         let mut pos = stack![
@@ -156,7 +154,7 @@ impl BuildLayout for FruchtermanReingold {
             )
         ];
 
-        observer.observe(graph, &ScatterLayout::new(&pos));
+        sequence.push(ScatterLayout::new(graph, pos.clone()));
 
         for _ in 0..200 {
             // V x D shaped
@@ -211,19 +209,19 @@ impl BuildLayout for FruchtermanReingold {
             //                    .map(|x| x.clamp(-self.height / 2., self.height / 2.))
             //            ];
             t = t * 0.995;
-            observer.observe(graph, &ScatterLayout::new(&pos));
+            sequence.push(ScatterLayout::new(graph, pos.clone()));
         }
-
-        ScatterLayout::new(&pos)
+        sequence.into_iter()
     }
 }
 
 #[cfg(test)]
 mod test {
-    use super::*;
-    use crate::builders::fruchterman_reingold::FruchtermanReingold;
-    use crate::render::svg::AnimationObserver;
+    use crate::engines::fruchterman_reingold::FruchtermanReingold;
+    use crate::layout::scatter::ScatterLayout;
+    use crate::render::svg::RenderSVG;
     use crate::test::{defined_graphs, random_graph};
+    use crate::Graph;
     use svg::Document;
 
     #[test]
@@ -231,18 +229,27 @@ mod test {
         fn create_animation(graph: &impl Graph, name: &str) {
             println!("Creating animation for {}", name);
 
-            let mut observer = AnimationObserver::new(graph);
-            {
-                let layout =
-                    FruchtermanReingold::new(500., 500., 424).observe(graph, &mut observer);
-                svg::save(
-                    format!("examples/{}-final.svg", name),
-                    &crate::render::svg::render(graph, &layout),
-                )
-                .unwrap();
-            }
-            let doc: Document = observer.try_into().unwrap();
-            svg::save(format!("examples/{}.svg", name), &doc).unwrap();
+            let layouts: Vec<ScatterLayout<_>> = graph
+                .animate(FruchtermanReingold::new(500., 500., 424))
+                .collect();
+            let last: ScatterLayout<_> = layouts.last().cloned().unwrap();
+
+            let document = Document::new()
+                .set("width", "800px")
+                .set("height", "800px")
+                .set("preserveAspectRatio", "none");
+
+            svg::save(
+                format!("examples/{}-final.svg", name),
+                &last.render(document.clone()).unwrap(),
+            )
+            .unwrap();
+
+            svg::save(
+                format!("examples/{}.svg", name),
+                &layouts.into_iter().render(document.clone()).unwrap(),
+            )
+            .unwrap();
         }
 
         for (name, graph) in defined_graphs() {

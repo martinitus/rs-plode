@@ -1,2 +1,2 @@
-#[cfg(feature = "svg")]
+//#[cfg(feature = "svg")]
 pub mod svg;

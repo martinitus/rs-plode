@@ -1,13 +1,34 @@
 extern crate core;
 
-pub mod builders;
+pub mod engines;
 pub mod layout;
 #[cfg(feature = "petgraph")]
 pub mod petgraph;
 pub mod render;
 
+pub trait Layout<G: Graph>: Clone {
+    fn graph(&self) -> &G;
+}
+
+/// The algorithm that defines and computes the layout.
+pub trait Engine: Sized {
+    type Layout<'a, G>: Layout<G>
+    where
+        G: Graph,
+        G: 'a;
+    type LayoutSequence<'a, G>: Iterator<Item = Self::Layout<'a, G>>
+    where
+        G: Graph,
+        G: 'a;
+
+    fn compute<'a, G: Graph>(self, graph: &'a G) -> Self::Layout<'a, G> {
+        return self.animate(graph).last().unwrap();
+    }
+    fn animate<'a, G: Graph>(self, graph: &'a G) -> Self::LayoutSequence<'a, G>;
+}
+
 /// Trait that needs to be implemented for graphs to support layouting.
-pub trait Graph {
+pub trait Graph: Sized + Clone {
     /// The type of the used edge iterator.
     type Edges: Iterator<Item = (usize, usize)>;
 
@@ -16,40 +37,14 @@ pub trait Graph {
 
     /// Get the pairs of (source, target) nodes.
     fn edges(&self) -> Self::Edges;
-}
 
-pub trait Observe<G, L>
-where
-    G: Graph,
-{
-    fn observe(&mut self, graph: &G, layout: &L);
-}
-
-impl<G, L, F> Observe<G, L> for F
-where
-    F: FnMut(&G, &L),
-    G: Graph,
-{
-    fn observe(&mut self, graph: &G, layout: &L) {
-        self(graph, layout)
-    }
-}
-
-pub trait BuildLayout {
-    type Layout;
-
-    fn build<G: Graph>(self, graph: &G) -> Self::Layout
-    where
-        Self: Sized,
-    {
-        self.observe(graph, &mut |_: &G, _: &Self::Layout| {})
+    fn layout<'a, E: Engine>(&'a self, engine: E) -> E::Layout<'a, Self> {
+        engine.compute(self)
     }
 
-    fn observe<G: Graph>(
-        self,
-        graph: &G,
-        observer: &mut impl Observe<G, Self::Layout>,
-    ) -> Self::Layout;
+    fn animate<'a, E: Engine>(&'a self, engine: E) -> E::LayoutSequence<'a, Self> {
+        engine.animate(self)
+    }
 }
 
 #[cfg(test)]

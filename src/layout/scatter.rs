@@ -2,17 +2,18 @@ use ndarray::{s, stack, Array2, Axis};
 
 use ndarray_stats::QuantileExt;
 
+use crate::{Graph, Layout};
+
 /// A layout where nodes can have a real valued position in 2D space.
 #[derive(Clone, Debug)]
-pub struct ScatterLayout {
-    positions: Array2<f32>
+pub struct ScatterLayout<'a, G: Graph> {
+    positions: Array2<f32>,
+    graph: &'a G,
 }
 
-impl ScatterLayout {
-    pub fn new(positions: &Array2<f32>) -> Self {
-        Self {
-            positions: positions.clone(),
-        }
+impl<'a, G: Graph> ScatterLayout<'a, G> {
+    pub fn new(graph: &'a G, positions: Array2<f32>) -> Self {
+        Self { positions, graph }
     }
 
     /// The bounding box that encompasses all nodes.
@@ -50,11 +51,18 @@ impl ScatterLayout {
             -self.bbox().0 .1 - self.height() / 2.,
         ));
         return Self {
+            graph: self.graph,
             positions: stack![
                 Axis(1),
                 &self.positions.slice(s![.., 0]) + tx,
                 &self.positions.slice(s![.., 1]) + ty
             ],
         };
+    }
+}
+
+impl<'a, G: Graph> Layout<G> for ScatterLayout<'a, G> {
+    fn graph(&self) -> &'a G {
+        self.graph
     }
 }

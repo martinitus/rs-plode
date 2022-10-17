@@ -7,6 +7,8 @@ impl<N, E, Ty, Ix> Graph for petgraph::Graph<N, E, Ty, Ix>
 where
     Ty: EdgeType,
     Ix: IndexType,
+    E: Clone,
+    N: Clone,
 {
     type Edges = std::vec::IntoIter<(usize, usize)>;
 
