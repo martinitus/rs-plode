@@ -2,8 +2,11 @@
 name = "rs-plode"
 version = "0.1.0"
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+authors = ["Martin Rueckl <martin.rueckl@codecentric.de>"]
+description = "Trait definitions and implementation that help layouting and rendering graphs."
+readme = "readme.md"
+license = "GPL-3.0"
+keywords = ["graph", "network", "layout", "rendering", "visualization"]
 
 [dependencies]
 ndarray = "0.15.6"
