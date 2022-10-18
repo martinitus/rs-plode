@@ -3,7 +3,7 @@ use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::rand::SeedableRng;
 use ndarray_rand::rand_distr::Uniform;
 use ndarray_rand::RandomExt;
-use ndarray_stats::{MaybeNanExt, QuantileExt};
+use ndarray_stats::MaybeNanExt;
 
 use crate::{layout::scatter::ScatterLayout, Engine, Graph};
 
@@ -53,16 +53,14 @@ use crate::{layout::scatter::ScatterLayout, Engine, Graph};
 ///   end
 /// ```
 pub struct FruchtermanReingold {
-    width: f32,
-    height: f32,
+    k: f32,
     rng: StdRng,
 }
 
 impl FruchtermanReingold {
-    pub fn new(width: f32, length: f32, seed: u64) -> Self {
+    pub fn new(k: f32, seed: u64) -> Self {
         Self {
-            width,
-            height: length,
+            k,
             rng: StdRng::seed_from_u64(seed),
         }
     }
@@ -129,14 +127,24 @@ impl FruchtermanReingold {
     }
 }
 
+impl Default for FruchtermanReingold {
+    fn default() -> Self {
+        Self {
+            k: 150.,
+            rng: StdRng::seed_from_u64(0),
+        }
+    }
+}
+
 impl Engine for FruchtermanReingold {
     type Layout<'a, G> = ScatterLayout<'a,G> where G: Graph, G:'a;
     type LayoutSequence<'a, G> = std::vec::IntoIter<Self::Layout<'a,G>> where G: Graph, G:'a;
 
     fn animate<'a, G: Graph>(mut self, graph: &'a G) -> Self::LayoutSequence<'a, G> {
-        let area = self.width * self.height;
-        let k = f32::sqrt(area / graph.nodes() as f32);
-        let mut t = self.width / 20.;
+        let border_length = f32::sqrt(graph.nodes() as f32) * self.k;
+        let t0 = border_length / 20.;
+        let mut t = t0;
+        const N: i32 = 200;
         let mut sequence = Vec::new();
 
         // the positions of the nodes. initialized randomly in 2 dimensions
@@ -144,24 +152,25 @@ impl Engine for FruchtermanReingold {
             Axis(1),
             Array1::<f32>::random_using(
                 (graph.nodes(),),
-                Uniform::new(-self.width / 2., self.width / 2.),
+                Uniform::new(-border_length / 2., border_length / 2.),
                 &mut self.rng,
             ),
             Array1::<f32>::random_using(
                 (graph.nodes(),),
-                Uniform::new(-self.height / 2., self.height / 2.),
+                Uniform::new(-border_length / 2., border_length / 2.),
                 &mut self.rng,
             )
         ];
 
-        sequence.push(ScatterLayout::new(graph, pos.clone()));
+        sequence.push(ScatterLayout::new(graph, pos.clone()).unwrap());
 
-        for _ in 0..200 {
+        for n in 0..N {
             // V x D shaped
-            let force = self.repulsive_force(&pos, k) + self.attractive_force(graph, &pos, k);
+            let force =
+                self.repulsive_force(&pos, self.k) + self.attractive_force(graph, &pos, self.k);
             let force_norm = (&force * &force)
                 .sum_axis(Axis(1))
-                .map(|x: &f32| f32::sqrt(*x));
+                .mapv(|x: f32| f32::max(1., x).sqrt());
             let force_scale = force_norm.mapv(|x: f32| f32::min(t, x));
             let displacement =
                 (&force / &force_norm.insert_axis(Axis(1))) * &force_scale.insert_axis(Axis(1));
@@ -175,31 +184,6 @@ impl Engine for FruchtermanReingold {
             //                &mut self.rng,
             //            );
 
-            // respect the bounds and guarantee that nodes stay within the configured viewport
-            // instead of simply clamping it to the bounding box, we here shift and scale everything
-            // to fit back into the bounding box. This may eventually help avoiding a node stalling /
-            // getting trapped in a corner.
-            let bbox: ((f32, f32), (f32, f32)) = (
-                //lower left
-                (
-                    *pos.slice(s![.., 0]).min().unwrap_or(&-1000.),
-                    *pos.slice(s![.., 1]).min().unwrap_or(&-1000.),
-                ),
-                // upper right
-                (
-                    *pos.slice(s![.., 0]).max().unwrap_or(&1000.),
-                    *pos.slice(s![.., 1]).max().unwrap_or(&1000.),
-                ),
-            );
-            let dims: (f32, f32) = (bbox.1 .0 - bbox.0 .0, bbox.1 .1 - bbox.0 .1);
-            // translate to center of coordinate system
-            pos = stack![
-                Axis(1),
-                &pos.slice(s![.., 0]) - bbox.0 .0 - dims.0 / 2.,
-                //                    .map(|x| x.clamp(-self.width / 2., self.width / 2.)),
-                &pos.slice(s![.., 1]) - bbox.0 .1 - dims.1 / 2.
-            ];
-
             // original clamping method
             //            pos = stack![
             //                Axis(1),
@@ -208,8 +192,8 @@ impl Engine for FruchtermanReingold {
             //                pos.slice(s![.., 1])
             //                    .map(|x| x.clamp(-self.height / 2., self.height / 2.))
             //            ];
-            t = t * 0.995;
-            sequence.push(ScatterLayout::new(graph, pos.clone()));
+            t = (1. - n as f32 / N as f32) * t0;
+            sequence.push(ScatterLayout::new(graph, pos.clone()).unwrap());
         }
         sequence.into_iter()
     }
@@ -225,13 +209,12 @@ mod test {
     use svg::Document;
 
     #[test]
-    fn fruchterman_reingold() {
+    fn fruchterman_reingold_no_panic() {
         fn create_animation(graph: &impl Graph, name: &str) {
             println!("Creating animation for {}", name);
 
-            let layouts: Vec<ScatterLayout<_>> = graph
-                .animate(FruchtermanReingold::new(500., 500., 424))
-                .collect();
+            let layouts: Vec<ScatterLayout<_>> =
+                graph.animate(FruchtermanReingold::default()).collect();
             let last: ScatterLayout<_> = layouts.last().cloned().unwrap();
 
             let document = Document::new()

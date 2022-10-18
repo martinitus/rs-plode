@@ -1,4 +1,5 @@
 use crate::layout::scatter::ScatterLayout;
+use crate::layout::{BoundingBox, Point};
 use crate::{Graph, Layout};
 use svg::node::element::path::Data;
 use svg::node::element::{Animate, AnimateTransform, Circle, Group, Line, Path, Text};
@@ -15,11 +16,13 @@ impl<'a, G: Graph> RenderSVG for ScatterLayout<'a, G> {
     type Canvas = Document;
 
     fn render(self, mut document: Document) -> Result<Self::Canvas, String> {
-        document = document.set("viewBox", (-500, -500, 1800, 1800));
+        document = document
+            .set("viewBox", view_box(&self.bbox(), 10))
+            .set("preserveAspectRatio", "xMidYMid meet");
         for (u, v) in self.graph().edges() {
             let data = Data::new()
-                .move_to(self.coord(u))
-                .line_to(self.coord(v))
+                .move_to((self.coord(u).x(), self.coord(u).y()))
+                .line_to((self.coord(v).x(), self.coord(v).y()))
                 .close();
             let path = Path::new()
                 .set("fill", "none")
@@ -63,9 +66,9 @@ where
     type Canvas = Document;
 
     fn render(self, mut document: Document) -> Result<Self::Canvas, String> {
-        fn node_group(n: usize, pos: (f32, f32)) -> Group {
+        fn node_group(n: usize, pos: Point) -> Group {
             Group::new()
-                .set("transform", format!("translate({}, {})", pos.0, pos.1))
+                .set("transform", format!("translate({}, {})", pos.x(), pos.y()))
                 .add(
                     Circle::new()
                         .set("r", "1cm")
@@ -81,7 +84,7 @@ where
                 )
         }
 
-        fn edge_line(_u: (f32, f32), _v: (f32, f32)) -> Line {
+        fn edge_line(_u: Point, _v: Point) -> Line {
             Line::new()
                 .set("fill", "none")
                 .set("stroke", "black")
@@ -94,28 +97,36 @@ where
             return Err("Need at least one step".to_string());
         }
 
-        document = document.set("viewBox", (-700, -700, 1400, 1400));
+        // translate/transform all layouts to match the last layouts bounding box.
+        let bbox = *layouts.last().unwrap().bbox();
+        let layouts: Vec<ScatterLayout<_>> =
+            layouts.into_iter().map(|l| l.transform(&bbox)).collect();
+
+        document = document
+            .set("viewBox", view_box(&bbox, 10))
+            .set("preserveAspectRatio", "xMidYMid meet");
+
         for (u, v) in layouts[0].graph().edges() {
             let mut line = edge_line(layouts[0].coord(u), layouts[0].coord(v));
 
             let ux: String = layouts
                 .iter()
-                .map(|s| s.coord(u).0.to_string())
+                .map(|s| s.coord(u).x().to_string())
                 .collect::<Vec<String>>()
                 .join(";");
             let uy: String = layouts
                 .iter()
-                .map(|s| s.coord(u).1.to_string())
+                .map(|s| s.coord(u).y().to_string())
                 .collect::<Vec<String>>()
                 .join(";");
             let vx: String = layouts
                 .iter()
-                .map(|s| s.coord(v).0.to_string())
+                .map(|s| s.coord(v).x().to_string())
                 .collect::<Vec<String>>()
                 .join(";");
             let vy: String = layouts
                 .iter()
-                .map(|s| s.coord(v).1.to_string())
+                .map(|s| s.coord(v).y().to_string())
                 .collect::<Vec<String>>()
                 .join(";");
             line.append(
@@ -158,12 +169,12 @@ where
         }
 
         for n in 0..layouts[0].graph().nodes() {
-            let mut master = node_group(n, (0., 0.));
+            let mut master = node_group(n, Point(0., 0.));
 
             if layouts.len() > 1 {
                 let trajectory: String = layouts
                     .iter()
-                    .map(|s| format!("{} {}", s.coord(n).0, s.coord(n).1))
+                    .map(|s| format!("{} {}", s.coord(n).x(), s.coord(n).y()))
                     .collect::<Vec<String>>()
                     .join(";");
                 master.append(
@@ -182,4 +193,22 @@ where
 
         Ok(document)
     }
+}
+
+/// Define a viewBox tuple from giving bounding box and padding percentage.
+fn view_box(bbox: &BoundingBox, padding: usize) -> (f32, f32, f32, f32) {
+    let frac = padding as f32 / 100.;
+
+    let height = f32::max(bbox.height() * (1. + 2. * frac), 400.);
+    let width = f32::max(bbox.width() * (1. + 2. * frac), 400.);
+
+    let shiftx = f32::max(0., height - bbox.height() * (1. + frac)) / 2.;
+    let shifty = f32::max(0., width - bbox.width() * (1. + frac)) / 2.;
+
+    (
+        bbox.lower_left().x() - shiftx,
+        bbox.lower_left().y() - shifty,
+        width,
+        height,
+    )
 }
