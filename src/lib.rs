@@ -120,6 +120,15 @@ mod test {
                 ],
             ),
             (
+                "disconnected-components",
+                &[
+                    // triangle 1
+                    (0, 1), (1, 2), (2, 0),
+                    // triangle 2
+                    (3, 4), (4, 5), (5, 3),
+                ],
+            ),
+            (
                 "triangulated-triangle",
                 &[
                     // outer edge 1
