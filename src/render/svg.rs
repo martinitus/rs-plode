@@ -1,6 +1,6 @@
-use crate::layout::scatter::ScatterLayout;
+use crate::layout::scatter::{ScatterLayout, ScatterLayoutSequence};
 use crate::layout::{BoundingBox, Point};
-use crate::{Graph, Layout};
+use crate::{Graph};
 use svg::node::element::path::Data;
 use svg::node::element::{Animate, AnimateTransform, Circle, Group, Line, Path, Text};
 use svg::{Document, Node};
@@ -12,14 +12,14 @@ pub trait RenderSVG {
     fn render(self, canvas: Self::Canvas) -> Result<Self::Canvas, String>;
 }
 
-impl<'a, G: Graph> RenderSVG for ScatterLayout<'a, G> {
+impl<G: Graph> RenderSVG for ScatterLayout<G> {
     type Canvas = Document;
 
     fn render(self, mut document: Document) -> Result<Self::Canvas, String> {
         document = document
             .set("viewBox", view_box(&self.bbox(), 10))
             .set("preserveAspectRatio", "xMidYMid meet");
-        for (u, v) in self.graph().edges() {
+        for (u, v) in self.graph.edges() {
             let data = Data::new()
                 .move_to((self.coord(u).x(), self.coord(u).y()))
                 .line_to((self.coord(v).x(), self.coord(v).y()))
@@ -33,7 +33,7 @@ impl<'a, G: Graph> RenderSVG for ScatterLayout<'a, G> {
             document.append(path);
         }
 
-        for n in 0..self.graph().nodes() {
+        for n in 0..self.graph.nodes() {
             let group = Group::new()
                 .set(
                     "transform",
@@ -59,9 +59,7 @@ impl<'a, G: Graph> RenderSVG for ScatterLayout<'a, G> {
     }
 }
 
-impl<'a, T, G: Graph + 'a> RenderSVG for T
-where
-    T: Iterator<Item = ScatterLayout<'a, G>>,
+impl<G: Graph> RenderSVG for ScatterLayoutSequence<G>
 {
     type Canvas = Document;
 
@@ -91,42 +89,32 @@ where
                 .set("stroke-width", 1)
         }
 
-        let layouts: Vec<ScatterLayout<'a, G>> = self.collect();
-
-        if layouts.len() == 0 {
-            return Err("Need at least one step".to_string());
-        }
-
         // translate/transform all layouts to match the last layouts bounding box.
-        let bbox = *layouts.last().unwrap().bbox();
-        let layouts: Vec<ScatterLayout<_>> =
-            layouts.into_iter().map(|l| l.transform(&bbox)).collect();
+        let bbox = self.bbox();
+        // let layouts: Vec<ScatterLayout<_>> =
+        //     layouts.into_iter().map(|l| l.transform(&bbox)).collect();
 
         document = document
             .set("viewBox", view_box(&bbox, 10))
             .set("preserveAspectRatio", "xMidYMid meet");
 
-        for (u, v) in layouts[0].graph().edges() {
-            let mut line = edge_line(layouts[0].coord(u), layouts[0].coord(v));
+        for (u, v) in self.graph.edges() {
+            let mut line = edge_line(self.coord(0, u), self.coord(0, v));
 
-            let ux: String = layouts
-                .iter()
-                .map(|s| s.coord(u).x().to_string())
+            let ux: String = (0..self.frames())
+                .map(|s| self.coord(s, u).x().to_string())
                 .collect::<Vec<String>>()
                 .join(";");
-            let uy: String = layouts
-                .iter()
-                .map(|s| s.coord(u).y().to_string())
+            let uy: String = (0..self.frames())
+                .map(|s| self.coord(s, u).y().to_string())
                 .collect::<Vec<String>>()
                 .join(";");
-            let vx: String = layouts
-                .iter()
-                .map(|s| s.coord(v).x().to_string())
+            let vx: String = (0..self.frames())
+                .map(|s| self.coord(s, v).x().to_string())
                 .collect::<Vec<String>>()
                 .join(";");
-            let vy: String = layouts
-                .iter()
-                .map(|s| s.coord(v).y().to_string())
+            let vy: String = (0..self.frames())
+                .map(|s| self.coord(s, v).y().to_string())
                 .collect::<Vec<String>>()
                 .join(";");
             line.append(
@@ -168,13 +156,12 @@ where
             document.append(line);
         }
 
-        for n in 0..layouts[0].graph().nodes() {
+        for n in 0..self.graph.nodes() {
             let mut master = node_group(n, Point(0., 0.));
 
-            if layouts.len() > 1 {
-                let trajectory: String = layouts
-                    .iter()
-                    .map(|s| format!("{} {}", s.coord(n).x(), s.coord(n).y()))
+            if self.frames() > 1 {
+                let trajectory: String = (0..self.frames())
+                    .map(|s| format!("{} {}", self.coord(s, n).x(), self.coord(s, n).y()))
                     .collect::<Vec<String>>()
                     .join(";");
                 master.append(

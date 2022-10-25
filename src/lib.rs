@@ -6,31 +6,19 @@ pub mod layout;
 pub mod petgraph;
 pub mod render;
 
-pub trait Layout<G: Graph>: Clone {
-    fn graph(&self) -> &G;
-}
-
 /// The algorithm that defines and computes the layout.
 pub trait Engine: Sized {
-    type Layout<'a, G>: Layout<G>
-    where
-        G: Graph,
-        G: 'a;
-    type LayoutSequence<'a, G>: Iterator<Item = Self::Layout<'a, G>>
-    where
-        G: Graph,
-        G: 'a;
+    type Layout<G: Graph>: Sized;
+    type LayoutSequence<G: Graph>: Sized;
 
-    fn compute<'a, G: Graph>(self, graph: &'a G) -> Self::Layout<'a, G> {
-        return self.animate(graph).last().unwrap();
-    }
-    fn animate<'a, G: Graph>(self, graph: &'a G) -> Self::LayoutSequence<'a, G>;
+    fn compute<G: Graph>(self, graph: G) -> Self::Layout<G>;
+    fn animate<G: Graph>(self, graph: G) -> Self::LayoutSequence<G>;
 }
 
 /// Trait that needs to be implemented for graphs to support layouting.
-pub trait Graph: Sized + Clone {
+pub trait Graph: Sized {
     /// The type of the used edge iterator.
-    type Edges: Iterator<Item = (usize, usize)>;
+    type Edges: Iterator<Item=(usize, usize)>;
 
     /// The number of nodes of the graph.
     fn nodes(&self) -> usize;
@@ -38,34 +26,105 @@ pub trait Graph: Sized + Clone {
     /// Get the pairs of (source, target) nodes.
     fn edges(&self) -> Self::Edges;
 
-    fn layout<'a, E: Engine>(&'a self, engine: E) -> E::Layout<'a, Self> {
+    fn layout<E: Engine>(self, engine: E) -> E::Layout<Self> {
         engine.compute(self)
     }
 
-    fn animate<'a, E: Engine>(&'a self, engine: E) -> E::LayoutSequence<'a, Self> {
+    fn animate<E: Engine>(self, engine: E) -> E::LayoutSequence<Self> {
         engine.animate(self)
     }
+}
+
+impl<T> Graph for &T where T: Graph {
+    type Edges = T::Edges;
+    fn nodes(&self) -> usize { (*self).nodes() }
+    fn edges(&self) -> T::Edges { (*self).edges() }
+    fn layout<E: Engine>(self, engine: E) -> E::Layout<Self> { engine.compute(self) }
+    fn animate<E: Engine>(self, engine: E) -> E::LayoutSequence<Self> { engine.animate(self) }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use ::petgraph::graph::UnGraph;
-    use ndarray::{Array2, Axis};
-    use ndarray_rand::{
-        rand::{prelude::StdRng, SeedableRng},
-        rand_distr::Uniform,
-        RandomExt,
-    };
+    use rand::{Rng, SeedableRng, rngs::StdRng};
+
+
+    #[derive(Clone, Debug)]
+    struct E;
+
+    #[derive(Clone, Debug)]
+    struct L<G: Graph>(G);
+
+    impl Graph for Vec<(usize, usize)> {
+        type Edges = std::vec::IntoIter<(usize, usize)>;
+
+        fn nodes(&self) -> usize {
+            // number of nodes is defined by the largest node id we know from the edge list.
+            let mut n: usize = 0;
+            for (s, t) in self {
+                n = usize::max(n, *s);
+                n = usize::max(n, *t);
+            }
+            n + 1
+        }
+
+        fn edges(&self) -> Self::Edges {
+            return self.clone().into_iter();
+        }
+    }
+
+    impl Graph for Vec<(u32, u32)> {
+        type Edges = std::vec::IntoIter<(usize, usize)>;
+
+        fn nodes(&self) -> usize {
+            // number of nodes is defined by the largest node id we know from the edge list.
+            let mut n: usize = 0;
+            for (s, t) in self {
+                n = usize::max(n, *s as usize);
+                n = usize::max(n, *t as usize);
+            }
+            n + 1
+        }
+
+        fn edges(&self) -> Self::Edges {
+            return self.iter().map(|(s, t)| (*s as usize, *t as usize)).collect::<Vec<(usize, usize)>>().into_iter();
+        }
+    }
+
+    impl Engine for E {
+        type Layout<G: Graph> = L<G>;
+        type LayoutSequence<G: Graph> = (G, Vec<L<G>>);
+
+        fn compute<G: Graph>(self, graph: G) -> Self::Layout<G> {
+            return L(graph);
+        }
+
+        fn animate<G: Graph>(self, graph: G) -> Self::LayoutSequence<G> {
+            return (graph, Vec::new());
+        }
+    }
+
+    #[test]
+    fn layout_by_ref_and_value() {
+        let graph: Vec<(usize, usize)> = Vec::new();
+
+        fn layout_by_reference<G: Graph>(graph: &G) -> L<&G> {
+            graph.layout(E {})
+        }
+
+        fn layout_by_value<G: Graph>(graph: G) -> L<G> {
+            graph.layout(E {})
+        }
+
+        layout_by_reference(&graph);
+        layout_by_value(graph);
+    }
+
 
     /// Create a random graph with given amout of edges and up to given amout of nodes.
     pub fn random_graph(nodes: usize, edges: usize, seed: u64) -> impl Graph {
         let mut rng = StdRng::seed_from_u64(seed);
-        UnGraph::<(), ()>::from_edges(
-            Array2::<u32>::random_using((edges, 2), Uniform::new(0, nodes as u32), &mut rng)
-                .axis_iter(Axis(0))
-                .map(|a| (a[0], a[1])),
-        )
+        (0..edges).map(|_| (rng.gen_range(0..nodes), rng.gen_range(0..nodes))).collect::<Vec<(usize, usize)>>()
     }
 
     /// Some predefined regular graphs helpful for testing and demonstration.
@@ -78,13 +137,13 @@ mod test {
             ("tetrahedron", &[(0, 1), (1, 2), (2, 0), (0, 3), (1, 3), (2, 3)]),
             ("custom", &[(0, 1), (1, 2), (2, 3), (3, 0), (0, 2), (1, 2), (2, 4), (2, 5), (4, 5)]),
             ("cube", &[
-                    // plane 1
-                    (0, 1), (1, 2), (2, 3), (3, 0),
-                    // plane 1
-                    (4, 5), (5, 6), (6, 7), (7, 4),
-                    // plane connections
-                    (0, 4), (1, 5), (2, 6), (3, 7),
-                ],
+                // plane 1
+                (0, 1), (1, 2), (2, 3), (3, 0),
+                // plane 1
+                (4, 5), (5, 6), (6, 7), (7, 4),
+                // plane connections
+                (0, 4), (1, 5), (2, 6), (3, 7),
+            ],
             ),
             (
                 "tree",
@@ -144,7 +203,7 @@ mod test {
                 ],
             ),
         ];
-        let v = graphs.iter().map(|&tpl|{(tpl.0, UnGraph::<(), ()>::from_edges(tpl.1))}).collect();
+        let v = graphs.iter().map(|&tpl| { (tpl.0, Vec::from(tpl.1)) }).collect();
         v
-   }
+    }
 }

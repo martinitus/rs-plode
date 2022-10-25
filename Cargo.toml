@@ -9,6 +9,7 @@ license = "GPL-3.0"
 keywords = ["graph", "network", "layout", "rendering", "visualization"]
 
 [dependencies]
+rand = "0.8.5"
 ndarray = "0.15.6"
 ndarray-rand = "0.14.0"
 ndarray-stats = "0.5.1"
