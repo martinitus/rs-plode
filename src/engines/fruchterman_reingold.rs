@@ -6,13 +6,14 @@ use ndarray_rand::RandomExt;
 use ndarray_stats::MaybeNanExt;
 
 use crate::{layout::scatter::ScatterLayout, Engine, Graph};
+use crate::layout::scatter::ScatterLayoutSequence;
 
 /// Implements force directed placement by Fruchterman and Reingold.
 ///
 /// Original paper: https://onlinelibrary.wiley.com/doi/epdf/10.1002/spe.4380211102
 ///
 /// This implementation mostly ignores performance considerations and tries to closely follow the
-//  pseudo code from the original paper (quote fig.1.).
+/// pseudo code from the original paper (quote fig.1.).
 /// ```text
 ///   area := W * L; { W and L are the width and length of the frame }
 ///   k := sqrt(area/|V|)
@@ -137,10 +138,16 @@ impl Default for FruchtermanReingold {
 }
 
 impl Engine for FruchtermanReingold {
-    type Layout<'a, G> = ScatterLayout<'a,G> where G: Graph, G:'a;
-    type LayoutSequence<'a, G> = std::vec::IntoIter<Self::Layout<'a,G>> where G: Graph, G:'a;
+    type Layout<G: Graph> = ScatterLayout<G>;
+    type LayoutSequence<G: Graph> = ScatterLayoutSequence<G>;
 
-    fn animate<'a, G: Graph>(mut self, graph: &'a G) -> Self::LayoutSequence<'a, G> {
+    fn compute<G: Graph>(self, graph: G) -> Self::Layout<G> {
+        let sequence = self.animate(graph);
+        let last = sequence.frame(sequence.frames() - 1).to_owned();
+        ScatterLayout::new(sequence.graph, last).unwrap()
+    }
+
+    fn animate<G: Graph>(mut self, graph: G) -> Self::LayoutSequence<G> {
         let border_length = f32::sqrt(graph.nodes() as f32) * self.k;
         let t0 = border_length / 20.;
         let mut t = t0;
@@ -162,12 +169,12 @@ impl Engine for FruchtermanReingold {
             )
         ];
 
-        sequence.push(ScatterLayout::new(graph, pos.clone()).unwrap());
+        sequence.push(pos.clone());
 
         for n in 0..N {
             // V x D shaped
             let force =
-                self.repulsive_force(&pos, self.k) + self.attractive_force(graph, &pos, self.k);
+                self.repulsive_force(&pos, self.k) + self.attractive_force(&graph, &pos, self.k);
             let force_norm = (&force * &force)
                 .sum_axis(Axis(1))
                 .mapv(|x: f32| f32::max(1., x).sqrt());
@@ -193,9 +200,9 @@ impl Engine for FruchtermanReingold {
             //                    .map(|x| x.clamp(-self.height / 2., self.height / 2.))
             //            ];
             t = (1. - n as f32 / N as f32) * t0;
-            sequence.push(ScatterLayout::new(graph, pos.clone()).unwrap());
+            sequence.push(pos.clone());
         }
-        sequence.into_iter()
+        ScatterLayoutSequence::new(graph, sequence).unwrap()
     }
 }
 
@@ -213,9 +220,8 @@ mod test {
         fn create_animation(graph: &impl Graph, name: &str) {
             println!("Creating animation for {}", name);
 
-            let layouts: Vec<ScatterLayout<_>> =
-                graph.animate(FruchtermanReingold::default()).collect();
-            let last: ScatterLayout<_> = layouts.last().cloned().unwrap();
+            let sequence = graph.animate(FruchtermanReingold::default());
+            let last: ScatterLayout<_> = ScatterLayout::new(graph, sequence.frame(sequence.frames() - 1).to_owned()).unwrap();
 
             let document = Document::new()
                 .set("width", "800px")
@@ -226,13 +232,13 @@ mod test {
                 format!("examples/{}-final.svg", name),
                 &last.render(document.clone()).unwrap(),
             )
-            .unwrap();
+                .unwrap();
 
             svg::save(
                 format!("examples/{}.svg", name),
-                &layouts.into_iter().render(document.clone()).unwrap(),
+                &sequence.render(document.clone()).unwrap(),
             )
-            .unwrap();
+                .unwrap();
         }
 
         for (name, graph) in defined_graphs() {

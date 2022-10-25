@@ -5,3 +5,4 @@ image*.svg
 animation.svg
 Cargo.lock
 /target
+/examples
